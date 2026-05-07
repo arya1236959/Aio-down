@@ -7,9 +7,18 @@ on:
         description: 'Full URL of the website to capture'
         required: true
         type: string
+      output_type:
+        description: 'Output format(s)'
+        required: true
+        type: choice
+        default: 'both'
+        options:
+          - pdf
+          - md
+          - both
 
 permissions:
-  contents: write   # needed to push the PDF back
+  contents: write
 
 jobs:
   capture:
@@ -18,26 +27,27 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
 
+      # Always install both pdf-lib and turndown (lightweight)
       - name: Install Node dependencies
         run: |
           npm init -y > /dev/null
-          npm install playwright pdf-lib
+          npm install playwright pdf-lib turndown
 
-      # Installs Chromium and required OS libraries
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
-      - name: Capture, merge and name PDF
+      - name: Capture, merge and generate files
+        env:
+          OUTPUT_TYPE: ${{ github.event.inputs.output_type }}
         run: node .github/script/website-capture.js "${{ github.event.inputs.url }}"
 
-      # ── Upload to website folder (robust push with retries) ──
       - name: Upload to website folder
         env:
           BRANCH: ${{ github.ref_name }}
@@ -47,7 +57,15 @@ jobs:
           git config http.postBuffer 524288000
 
           mkdir -p website
-          mv output.pdf website/${FILENAME}
+
+          # Move files that exist (PDF and/or MD)
+          if [ -f output.pdf ]; then
+            mv output.pdf website/${FILENAME}.pdf
+          fi
+          if [ -f output.md ]; then
+            mv output.md website/${FILENAME}.md
+          fi
+          # The media folder (if created) is already inside website/content
 
           FILES=(website/*)
           if [ ${#FILES[@]} -eq 0 ]; then
